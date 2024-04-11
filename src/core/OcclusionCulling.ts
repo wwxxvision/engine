@@ -1,80 +1,177 @@
 import * as THREE from 'three'
-import { MathUtils } from "three"
+
+const _camera = new THREE.Camera()
+const projectionViewMatrix = new THREE.Matrix4()
+
+const depthMaterial = new THREE.ShaderMaterial({
+  vertexShader: /* glsl */ `
+    void main() {
+      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1);
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    void main() {
+      gl_FragColor = vec4(gl_FragCoord.z, 0, 0, 1);
+    }
+  `,
+})
+
+const geometry = new THREE.BufferGeometry()
+geometry.setDrawRange(0, 3)
+geometry.boundingSphere = new THREE.Sphere().set(new THREE.Vector3(), Infinity)
+geometry.attributes = {
+  radius: new THREE.BufferAttribute(new Float32Array(3), 1),
+  position: new THREE.BufferAttribute(new Float32Array(9), 3),
+  // TODO: only highp supported, use uint8
+  visibility: new THREE.InstancedBufferAttribute(new Uint32Array(3), 1),
+}
+geometry.attributes.visibility.gpuType = THREE.IntType
+
+
+const cullMaterial = new THREE.ShaderMaterial({
+  uniforms: {
+    projectionViewMatrix: new THREE.Uniform(projectionViewMatrix),
+    mipmap: new THREE.Uniform(null),
+  },
+  vertexShader: /* glsl */ `
+    uniform mat4 projectionViewMatrix;
+    uniform sampler2D mipmap;
+
+    in float radius;
+    in vec3 position;
+    flat out uint visibility;
+
+    void main() {
+       bool visible = true;
+
+        mat4 frustum = transpose(projectionViewMatrix);
+        vec4 planes[] = vec4[](
+          frustum[3] - frustum[0], // left   (-w < +x)
+          frustum[3] + frustum[0], // right  (+x < +w)
+          frustum[3] - frustum[1], // bottom (-w < +y)
+          frustum[3] + frustum[1], // top    (+y < +w)
+          frustum[3] - frustum[2], // near   (-w < +z)
+          frustum[3] + frustum[2]  // far    (+z < +w)
+        );
+
+        for (int i = 0; i < 6; i++) {
+          float distance = dot(planes[i], vec4(position, 1));
+          if (distance < -radius) {
+            visible = false;
+            break;
+          }
+        }
+
+        // Write visibility
+        visibility = visible ? 1u : 0u;
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    void main() {
+   
+    }
+  `,
+  glslVersion: THREE.GLSL3,
+})
+
+const cullMesh = new THREE.Mesh(geometry, cullMaterial)
+
+
+// Текстура глубины
+const depthTarget = new THREE.WebGLRenderTarget(0, 0, {
+    minFilter: THREE.NearestFilter,
+    type: THREE.HalfFloatType,
+    format: THREE.RedFormat,
+  })
+  
 
 
 
 
 export class OcclusionCulling  {
     firstRender = true
-    cullTarget: THREE.WebGLRenderTarget
-    cullPixels: Uint8Array = new Uint8Array()
-    cullMaterial = new THREE.MeshBasicMaterial({ vertexColors: true });
-    cullMap: {[colorID: number]: boolean} = {}
-    snapshotElement = document.querySelector('#snapshot')
-
-    constructor() {
-
-        this.cullTarget = this.createCullTarget();
-        this.cullPixels = new Uint8Array(4 * this.cullTarget.width * this.cullTarget.height);
-    }
-
-    createCullTarget() {
-        const target = new THREE.WebGLRenderTarget(Math.floor(window.innerWidth), Math.floor(window.innerHeight));
-        target.texture.format = THREE.RGBAFormat;
-        target.texture.colorSpace = THREE.LinearSRGBColorSpace;
-        target.texture.minFilter = THREE.NearestFilter;
-        target.texture.magFilter = THREE.NearestFilter;
-        target.texture.generateMipmaps = false;
-        target.stencilBuffer = false;
-        target.depthBuffer = true;
-        target.depthTexture = new THREE.DepthTexture(Math.floor(window.innerWidth), Math.floor(window.innerHeight));
-        target.depthTexture.format = THREE.DepthFormat;
-        target.depthTexture.type = THREE.UnsignedShortType;
-
-        return target;
-    } 
-
-
-
-    update(scene: THREE.Scene, hiddenScene: THREE.Scene, renderer: THREE.WebGLRenderer, camera: THREE.Camera) {
-        this.cullMap = {}
-        const pixels = new Uint8Array(
-            window.innerHeight * window.innerWidth * 4,
-          );
-        const bufferTexture = new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, { minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter, format: THREE.RGBAFormat});
+    renderer = new THREE.WebGLRenderer()
+    scene = new THREE.Scene()
+    camera = new THREE.Camera()
+    target = new THREE.Vector3()
   
-        renderer.setRenderTarget(bufferTexture)
-        // Устанавливаем рендер во внеэкранную текстуру
-        renderer.render(hiddenScene, camera);
+      
 
-   
-         // И, наконец, отрисовываем результат на экране
-         renderer.readRenderTargetPixels(
-            bufferTexture,
-            0,
-            0,
-            window.innerWidth,
-            window.innerHeight,
-            pixels
-        )
+    constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera, target: THREE.Vector3) {
+        this.renderer = renderer
+        this.scene = scene
+        this.camera = camera
+        this.target = target
 
-         
-        renderer.setRenderTarget(null)
-        renderer.render(scene, camera);
+        this.onResize()
+        window.addEventListener('resize', this.onResize)
+    }
+
+    onResize = () => {
+        this.renderer.setSize(window.innerWidth, window.innerHeight)
+       
+        this.camera.aspect = window.innerWidth / window.innerHeight
+        this.camera.updateProjectionMatrix()
+      }
     
+      
+    private compute() {
+      const gl = this.renderer.getContext() as WebGL2RenderingContext
 
-        for (let i = 0; i < pixels.length; i += 4) {
-            const r = MathUtils.clamp(pixels[i], 0, 255);
-            const g = MathUtils.clamp(pixels[i + 1], 0, 255);
-            const b = MathUtils.clamp(pixels[i + 2], 0, 255);
-            const c = (r << 16) | (g << 8) | b; // Construct color value
-            this.cullMap[c] = true; // Set cullMap value to true for this color
-        }
+      // gl.enable(gl.RASTERIZER_DISCARD);
 
+      // cullMaterial.uniforms.mipmap.value = depthTarget.texture
+      // this.renderer.render(cullMesh, _camera)
+      // const materialProperties = this.renderer.properties.get(cullMaterial)
+      // const compiled  = materialProperties.currentProgram
+      // const program  = compiled.program as WebGLProgram
+
+      // gl.getVertexAttrib()
+
+      // const buffer = new  Uint8Array()
+      // gl.getBufferSubData(gl.ARRAY_BUFFER,3, buffer)
+      // gl.cullFace(gl.FRONT_AND_BACK);  
+
+      // gl.disable(gl.RASTERIZER_DISCARD);
+   
+
+      // gl.linkProgram(program);
+      // if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      //   throw new Error(gl.getProgramParameter(program));
+      // }
+      
+      // console.log(buffer)
+
+
+      // const compiled =this.renderer.compile()
+      
+
+      // gl.transformFeedbackVaryings()
+  
     }
 
-    hasID(id: number) {
-        return this.cullMap[id];
+
+    update() {
+
+      this.renderer.setRenderTarget(depthTarget)
+      this.scene.overrideMaterial = depthMaterial
+   
+    
+      // Render with culling
+      this.renderer.render(this.scene, this.camera)
+      this.scene.overrideMaterial = null
+
+      this.renderer.setRenderTarget(null)
+
+      this.camera.updateWorldMatrix()
+      projectionViewMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse)
+
+      this.compute()
+
+      this.renderer.render(this.scene, this.camera)
     }
+
+
+
 }
 

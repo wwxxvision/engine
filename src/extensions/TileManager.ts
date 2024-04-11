@@ -28,6 +28,7 @@ export class TileManager {
     occlusionCulling = new OcclusionCulling()
     firstRender = true
     hiddenScene = new THREE.Scene()
+    unitedGeometry = new THREE.BufferGeometry()
 
 
     constructor(options: TileOptions) {
@@ -48,6 +49,8 @@ export class TileManager {
             this.hiddenScene.add(aabb)
   
         })
+
+        
     }
 
     get aabb() {
@@ -56,6 +59,7 @@ export class TileManager {
 
         return box3
     }
+
 
     private buildTiles(node: TilesTree) {
    
@@ -75,7 +79,7 @@ export class TileManager {
 
            
             const tile = new Tile(new THREE.Box3(minVector3, maxVector3), node?.meshes)
-            this.tiles.add(tile)
+            // this.tiles.add(tile)
             
             
             // // Create a BoxGeometry
@@ -99,6 +103,8 @@ export class TileManager {
     public removeFromScene(scene: THREE.Scene) {
         scene.remove(this.tiles);
     }
+
+
 
 
     public renderTiles(scene: THREE.Scene, renderer: THREE.WebGLRenderer, camera: THREE.Camera) {

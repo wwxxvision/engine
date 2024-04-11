@@ -94,3 +94,12 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+
+#inspection-canvas {
+  position: absolute;
+  z-index: 1;
+  left: 2%;
+  bottom: 2%;
+  border: 1px solid black;
+  background-color: white;
+}

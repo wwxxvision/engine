@@ -10,6 +10,8 @@ interface IProperties {
 }
 
 
+
+
 const loader = new GLTFLoader()
 const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('/public/dracov2/');
@@ -73,18 +75,19 @@ export class Tile extends THREE.Group {
            return loader.load(
                 `/public/converter_source/test/${meshName}.glb`,
                 function (gltf) {
-                    gltf.scene.traverse(object => {
-                        object.matrixAutoUpdate = false
-                        if (object.isMesh) {
-                            object.material =self.material
+                    // gltf.scene.traverse(object => {
+                    //     object.matrixAutoUpdate = false
+                    //     object.matrixWorldAutoUpdate = false
+                    //     if (object.isMesh) {
+                    //         object.material =self.material
                       
-                        }
-                    })
+                    //     }
+                    // })
 
               
                 
                     self.ready = true
-                    self.gltf.add(gltf.scene)
+                    // self.gltf.add(gltf.scene)
                
 
                     console.log(`${meshName}.glb ready`)
