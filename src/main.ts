@@ -51,17 +51,23 @@ async function loadModels() {
 	// 	gltfLoad.push(loader.load(`${root}/d41d8cd98f00b204e9800998ecf8427e.glb`))
 	// }
 
+
+
 	gltfLoad.push(loader.load(`${root}/d41d8cd98f00b204e9800998ecf8427e.glb`))
 	const models =  await Promise.all(gltfLoad)
 
-	const batchMeshes = new BatchMeshes(models.map(model => model))
+//	const batchMeshes = new BatchMeshes(models.map(model => model))
 
-	const aabb = new THREE.Box3().setFromObject(batchMeshes)
+    models.forEach(model => scene.add(model.scene))
+
+    const aabb = new THREE.Box3().setFromObject(scene)
+
+	//const aabb = new THREE.Box3().setFromObject(batchMeshes)
 	cameraControls.fitToBox(aabb, true, {cover: true});
 
 
 
-	scene.add(batchMeshes)
+	//scene.add(batchMeshes)
 }
 
 
