@@ -139,6 +139,40 @@ precision highp sampler2D;
       if (level == 4) return textureGather(tex[4], uv, comp);
       return textureGather(tex[5], uv, comp);
     }
+	
+	vec4 extractFrustumPlane(mat4 pv, int i) {
+    vec4 row = (i < 4) ? pv[i] : pv[i - 4]; // Rows 0-3 are for the projection, rows 4-7 are for the view
+	
+	vec4 res = vec4(normalize(row.xyz), row.w);
+	res.w = res.w / length(row.xyz);
+	return res;
+	
+	
+    float s = sign(row.w);
+    return s * row;
+}
+
+// Function to compute the frustum planes from the combined projection-view matrix
+void computeFrustumPlanes(mat4 pv, out vec4 planes[6]) {
+    // Right
+    planes[0] = extractFrustumPlane(pv, 3) + extractFrustumPlane(pv, 0);
+
+    // Left
+    planes[1] = extractFrustumPlane(pv, 3) - extractFrustumPlane(pv, 0);
+
+    // Bottom
+    planes[2] = extractFrustumPlane(pv, 3) + extractFrustumPlane(pv, 1);
+
+    // Top
+    planes[3] = extractFrustumPlane(pv, 3) - extractFrustumPlane(pv, 1);
+
+    // Far
+    planes[4] = extractFrustumPlane(pv, 3) + extractFrustumPlane(pv, 2);
+
+    // Near
+    planes[5] = extractFrustumPlane(pv, 3) - extractFrustumPlane(pv, 2);
+}
+
 
     void main() {
       bool visible = true;
@@ -149,8 +183,6 @@ precision highp sampler2D;
 	  float frustumCull = 0.;
 
       // Frustum cull
-      if (visible) {
-        // http://cs.otago.ac.nz/postgrads/alexis/planeExtraction.pdf
         mat4 frustum = transpose(projectionViewMatrix);
         vec4 planes[] = vec4[](
           frustum[3] - frustum[0], // left   (-w < +x)
@@ -160,16 +192,23 @@ precision highp sampler2D;
           frustum[3] - frustum[2], // near   (-w < +z)
           frustum[3] + frustum[2]  // far    (+z < +w)
         );
-
+		
+		//vec4 planes[6];
+		//computeFrustumPlanes(frustum, planes);	
         for (int i = 0; i < 6; i++) {
-          float distance = dot(planes[i], vec4(position, 1));
+		  float l = length(planes[i].xyz);
+		   planes[i].xyz= normalize(planes[i].xyz);
+		   planes[i].w /= l;
+		
+		
+          float distance = dot(planes[i].xyz, position) + planes[i].w;
           if (distance < -radius) {
             visible = false;
 			frustumCull = 1.;
             break;
           }
         }
-      }
+      
 	float depth;
 	vec4 tile;
 	vec4 ndc;
@@ -191,7 +230,7 @@ precision highp sampler2D;
       }
 
       // Write visibility
-      color = vec4(visible ? 1u : 0u,0.,0, 0);
+      color = vec4(1.-frustumCull,0,0, 0);
 	  //color = vec4(0, 0,0,0);
 	  
     }
@@ -218,7 +257,7 @@ const visibilityTarget = new THREE.WebGLRenderTarget(0, 0, {
 var buffer = new Uint8Array(visibilityTarget.width * visibilityTarget.height * 4);
 
 
-
+var geometries = [];
 
 export class OcclusionCulling  {
     firstRender = true
@@ -295,6 +334,7 @@ export class OcclusionCulling  {
 		  {
 		    child.geometry.computeBoundingSphere();
             spheres.push(child.geometry.boundingSphere);
+			
           }
 		  })
 
@@ -326,7 +366,18 @@ export class OcclusionCulling  {
 		cullMaterial.uniforms.sourceData.value = positionsTexture;
 		buffer = new Uint8Array(visibilityTarget.width * visibilityTarget.height * 4);
 		
+		const material = new THREE.MeshBasicMaterial( { color: 0xffffff99 } ); 
+		material.wireframe = true;
+		for(let i =0; i < countOfGeometry;i ++)
+		{
+			const geometry = new THREE.SphereGeometry( spheres[i].radius, 32, 16 ); 
 		
+			const sphere = new THREE.Mesh( geometry, material ); 
+			//sphere.position.set(spheres[i].center...);
+			this.scene.add( sphere );
+			sphere.position.copy(spheres[i].center);
+			geometries.push(sphere);
+		}
 		
 		
 		cullMaterial.dispose()
@@ -359,19 +410,29 @@ export class OcclusionCulling  {
       this.renderer.setRenderTarget(null)
 
       this.camera.updateWorldMatrix()
-      projectionViewMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse)
-     
+	  projectionViewMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+	  //let myMatrix = new THREE.Matrix4();
+      //myMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse)
+	  //cullMaterial.uniforms.projectionViewMatrix = {value:myMatrix};
+	  //
+      //console.log(projectionViewMatrix); 
 	  this.compute(cullMesh)
 	  
-	  let i = 0;
-	  this.scene.traverse(child => {
-          if (child?.geometry) 
-		  {
-			
-			child.visible = buffer[i*4]>0;
-			i++;
-          }
-		  })
+	//  let i = 0;
+	//  this.scene.traverse(child => {
+    //      if (child?.geometry) 
+	//	  {
+	//		if(buffer.length <= i*4) 
+	//			return;
+	//		child.visible = buffer[i*4]>0;
+	//		i++;
+	//		
+    //      }
+	//	  })
+	for(let i =0; i < geometries.length; i ++ )
+	{
+		geometries[i].visible = buffer[i*4]>0;
+	}
 		  
 	  this.renderer.render(this.scene, this.camera)
        
