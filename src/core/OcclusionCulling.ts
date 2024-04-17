@@ -2,6 +2,7 @@ import * as THREE from 'three'
 
 const _camera = new THREE.Camera()
 const projectionViewMatrix = new THREE.Matrix4()
+const viewMatrix = new THREE.Matrix4()
 
 const depthMaterial = new THREE.ShaderMaterial({
   vertexShader: /* glsl */ `
@@ -95,6 +96,7 @@ const cullMaterial = new THREE.RawShaderMaterial({
   },
   uniforms: {
     projectionViewMatrix: new THREE.Uniform(projectionViewMatrix),
+    viewMatrix: new THREE.Uniform(viewMatrix),
     resolution: new THREE.Uniform(new THREE.Vector2()),
     mipmaps: new THREE.Uniform(null),
 	sourceData : new THREE.Uniform(null),
@@ -112,6 +114,7 @@ const cullMaterial = new THREE.RawShaderMaterial({
 precision highp float;
 precision highp sampler2D;
     uniform mat4 projectionViewMatrix;
+    uniform mat4 viewMatrix;
     uniform vec2 resolution;
     uniform sampler2D[NUM_MIPS] mipmaps;
 	
@@ -214,24 +217,31 @@ void computeFrustumPlanes(mat4 pv, out vec4 planes[6]) {
 	vec4 ndc;
 	int mip;
       // Occlusion cull
-      if (visible) {
+      //if (visible) 
+	  {
         // Calculate sphere NDC from projected position
-        ndc = projectionViewMatrix * vec4(position.xy, position.z - radius, 1);
+		vec4 offset = viewMatrix*vec4(0,0,radius,0);
+		
+        ndc = projectionViewMatrix * vec4(position.xyz + offset.xyz, 1);
         ndc.xyz /= ndc.w;
 
         // Sample screen depth
         vec2 uv = (ndc.xy + 1.0) * 0.5;
-        mip = int(ceil(log2(radius * resolution)));
-         tile = textureGatherLevel(mipmaps, uv, mip, 0);
-        depth = max(max(tile.x, tile.y), max(tile.z, tile.w));
+		if(uv.x>0. && uv.x < 1. && uv.y>0. && uv.y<1.)
+		{
+			mip = int(ceil(log2(radius * resolution)));
+			 tile = textureGatherLevel(mipmaps, uv, 0, 0);
+			depth = max(max(tile.x, tile.y), max(tile.z, tile.w));
 
-        // Test NDC against screen depth
-        if (depth < ndc.z) visible = false;
+			// Test NDC against screen depth
+			//if (depth < ndc.z + 0.01) visible = false;
+			if (depth < ndc.z *  1.01 ) visible = false;
+		}
       }
 
       // Write visibility
-      color = vec4(1.-frustumCull,0,0, 0);
-	  //color = vec4(0, 0,0,0);
+      //color = vec4(visible,1.-frustumCull,0, 0);
+	  color = vec4(visible,0,  0,0);
 	  
     }
   `,
@@ -256,7 +266,7 @@ const visibilityTarget = new THREE.WebGLRenderTarget(0, 0, {
   })
 var buffer = new Uint8Array(visibilityTarget.width * visibilityTarget.height * 4);
 
-
+ var spheres = [];
 var geometries = [];
 
 export class OcclusionCulling  {
@@ -319,15 +329,20 @@ export class OcclusionCulling  {
 
 
     update() {
-
+ this.scene.traverse(child => {
+          if (child?.geometry) 
+		  {
+			child.visible = true;
+          }
+		  })
    //  this.renderer.setRenderTarget(depthTarget)
    //  this.scene.overrideMaterial = depthMaterial
    //  this.renderer.render(this.scene, this.camera)
-   
+  
    if(firsUpdateFuckingCostyl && this.scene.children.length > 2)
    {
 		let batched = this.scene.children[2].children[0];
-		let spheres = [];
+		
 		
 		this.scene.traverse(child => {
           if (child?.geometry) 
@@ -345,7 +360,7 @@ export class OcclusionCulling  {
 		let data = new Float32Array(countOfGeometry);
 		let colorsCount = 4;
 	    data = new Float32Array(countOfGeometry * colorsCount);
-		for(let i =0 ;i < countOfGeometry; i ++ )
+		for(let i =0 ; i < countOfGeometry; i ++ )
 		{
 			let sphere = spheres[i];
 			data[i*colorsCount+0] = sphere.center.x;
@@ -353,7 +368,7 @@ export class OcclusionCulling  {
 			data[i*colorsCount+2] = sphere.center.z;
 			data[i*colorsCount+3] = sphere.radius;
 		}
-		visibilityTarget.setSize(1,countOfGeometry);	
+		visibilityTarget.setSize(1,window.innerHeight);	
 		
 		positionsTexture = new THREE.DataTexture(
             data,
@@ -366,15 +381,15 @@ export class OcclusionCulling  {
 		cullMaterial.uniforms.sourceData.value = positionsTexture;
 		buffer = new Uint8Array(visibilityTarget.width * visibilityTarget.height * 4);
 		
-		const material = new THREE.MeshBasicMaterial( { color: 0xffffff99 } ); 
-		material.wireframe = true;
+	
 		for(let i =0; i < countOfGeometry;i ++)
 		{
 			const geometry = new THREE.SphereGeometry( spheres[i].radius, 32, 16 ); 
-		
+			const material = new THREE.MeshBasicMaterial( { color: 0xffffff99 } ); 
+		    //material.wireframe = true;
 			const sphere = new THREE.Mesh( geometry, material ); 
 			//sphere.position.set(spheres[i].center...);
-			this.scene.add( sphere );
+			//this.scene.add( sphere );
 			sphere.position.copy(spheres[i].center);
 			geometries.push(sphere);
 		}
@@ -399,18 +414,19 @@ export class OcclusionCulling  {
   }
   this.renderer.setRenderTarget(null)
       this.scene.overrideMaterial = null
-	  this.scene.traverse(child => {
-          if (child?.geometry) 
-		  {
-			child.visible = true;
-          }
-		  })
+	 
 
 
       this.renderer.setRenderTarget(null)
 
       this.camera.updateWorldMatrix()
+	  viewMatrix.copy(this.camera.matrixWorld);
 	  projectionViewMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse);
+	  
+	  //let myVec = new THREE.Vector4(spheres[0].center.x,spheres[0].center.y, spheres[0].center.z,1);
+	  //myVec.applyMatrix4(projectionViewMatrix);
+	  //console.log(myVec.z/myVec.w  + "  " + myVec.z);
+	  
 	  //let myMatrix = new THREE.Matrix4();
       //myMatrix.multiplyMatrices(this.camera.projectionMatrix, this.camera.matrixWorldInverse)
 	  //cullMaterial.uniforms.projectionViewMatrix = {value:myMatrix};
@@ -418,22 +434,29 @@ export class OcclusionCulling  {
       //console.log(projectionViewMatrix); 
 	  this.compute(cullMesh)
 	  
-	//  let i = 0;
-	//  this.scene.traverse(child => {
-    //      if (child?.geometry) 
-	//	  {
-	//		if(buffer.length <= i*4) 
-	//			return;
-	//		child.visible = buffer[i*4]>0;
-	//		i++;
-	//		
-    //      }
-	//	  })
+	  let i = 0;
+		this.scene.traverse(child => {
+			if (child?.geometry) 
+		{
+		let i2 = Math.floor(window.innerHeight / geometries.length * i);
+		let index = (i2+2)*4;
+			//if(buffer.length <= i*4) 
+			//	return;
+			child.visible = buffer[index]>0.5;
+			i++;
+			
+			}
+		})
 	for(let i =0; i < geometries.length; i ++ )
 	{
-		geometries[i].visible = buffer[i*4]>0;
-	}
-		  
+		let i2 = Math.floor(window.innerHeight / geometries.length * i);
+		let index = (i2+2)*4;
+		geometries[i].material.color.r = buffer[index +0] /256.;
+		geometries[i].material.color.g = buffer[index +1] /256.;
+		geometries[i].material.color.b = buffer[index +2] /256.;
+		//geometries[i].visible = buffer[(i2+2)*4]>0;
+		
+	}    
 	  this.renderer.render(this.scene, this.camera)
        
 	  

@@ -22,7 +22,7 @@ CameraControls.install( { THREE: THREE } );
 
 const clock = new THREE.Clock();
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 0.1, 100 );
+const camera = new THREE.PerspectiveCamera( 60, window.innerWidth / window.innerHeight, 0.8, 3000 );
 const light = new THREE.AmbientLight(new THREE.Color("white"))
 const dirLight = new THREE.DirectionalLight(new THREE.Color("white"), 0.6)
 scene.add( light );
